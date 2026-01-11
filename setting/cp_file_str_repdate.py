@@ -1,117 +1,142 @@
 import os
 import sys
-import shutil
-import configparser
 import re
+import shutil
 import stat
+import configparser
 from datetime import datetime
+from typing import Dict
 
-def get_script_dir():
+
+# ============================================================
+# Utility
+# ============================================================
+
+def get_script_dir() -> str:
     """
-    Get directory where script or exe exists
+    Get directory where this script or exe exists.
     """
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-def error_exit(message: str):
-    print(message)
+
+def error_exit(message: str) -> None:
+    print(f"Error: {message}")
     sys.exit(1)
 
-def load_ini():
-    script_dir = get_script_dir()
-    script_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-    ini_path = os.path.join(script_dir, f"{script_name}.ini")
+
+# ============================================================
+# INI handling
+# ============================================================
+
+def load_ini() -> Dict[str, str]:
+    """
+    Load ini file based on script filename.
+    """
+    script_dir: str = get_script_dir()
+    script_name: str = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+    ini_path: str = os.path.join(script_dir, f"{script_name}.ini")
 
     if not os.path.exists(ini_path):
-        error_exit(
-            "Error: INI file not found.\n"
-            f"Path: {ini_path}"
-        )
+        error_exit(f"INI file not found: {ini_path}")
 
-    # Disable interpolation to allow %Y%m%d
+    # ★ %y%m%d を扱うため interpolation 無効
     config = configparser.ConfigParser(interpolation=None)
     config.read(ini_path, encoding="utf-8")
-    return config
 
-def date_format_to_regex(fmt: str) -> str:
-    """
-    Convert strftime format to regex
-    Example: %Y%m%d -> \\d{4}\\d{2}\\d{2}
-    """
-    regex = fmt
-    regex = regex.replace("%Y", r"\d{4}")
-    regex = regex.replace("%m", r"\d{2}")
-    regex = regex.replace("%d", r"\d{2}")
-    return regex
+    if "DATE" not in config:
+        error_exit("Missing [DATE] section in ini file.")
 
-def main():
-    # Argument check
-    if len(sys.argv) < 2:
+    if "format" not in config["DATE"]:
+        error_exit("Missing 'format' in [DATE] section.")
+
+    return {
+        "date_format": config["DATE"]["format"]
+    }
+
+
+# ============================================================
+# Date extraction
+# ============================================================
+
+def extract_date_from_filename(filename: str, date_format: str) -> str:
+    """
+    Extract date string from filename using given date format.
+    """
+    format_map = {
+        "%Y": r"\d{4}",
+        "%y": r"\d{2}",
+        "%m": r"\d{2}",
+        "%d": r"\d{2}",
+    }
+
+    regex_pattern: str = re.escape(date_format)
+    for key, value in format_map.items():
+        regex_pattern = regex_pattern.replace(re.escape(key), value)
+
+    match = re.search(regex_pattern, filename)
+    if not match:
+        today = datetime.today().strftime(date_format)
         error_exit(
-            "Error: Input file is not specified.\n"
-            "Usage: file_copy_tool <input_file>"
+            "Filename does not contain a valid date.\n"
+            f"Expected format : {date_format}\n"
+            f"Example (today) : {today}\n"
+            f"Example filename: memo_{today}.txt"
         )
 
-    input_path = os.path.abspath(sys.argv[1])
+    date_str: str = match.group()
+
+    # validate date
+    try:
+        datetime.strptime(date_str, date_format)
+    except ValueError:
+        error_exit(f"Invalid date value in filename: {date_str}")
+
+    return date_str
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        error_exit("Usage: cp_file_str_repdate <input_file>")
+
+    input_path: str = os.path.abspath(sys.argv[1])
 
     if not os.path.isfile(input_path):
+        error_exit(f"Input file not found: {input_path}")
+
+    # load ini
+    ini: Dict[str, str] = load_ini()
+    date_format: str = ini["date_format"]
+
+    filename: str = os.path.basename(input_path)
+    dir_path: str = os.path.dirname(input_path)
+
+    # extract date
+    old_date: str = extract_date_from_filename(filename, date_format)
+    print(f"Detected date: {old_date}")
+
+    today_str: str = datetime.today().strftime(date_format)
+
+    # 今日の日付は禁止
+    if old_date == today_str:
         error_exit(
-            "Error: Input file does not exist.\n"
-            f"Path: {input_path}"
+            "The date in the filename is today.\n"
+            f"Date in filename: {old_date}"
         )
 
-    # Load INI
-    config = load_ini()
-    date_format = config["DATE"]["format"]
+    # create destination filename
+    new_filename: str = filename.replace(old_date, today_str)
+    dst_path: str = os.path.join(dir_path, new_filename)
 
-    file_name = os.path.basename(input_path)
-    dir_path = os.path.dirname(input_path)
-
-    # Build regex from date format
-    date_regex = date_format_to_regex(date_format)
-
-    # Search date in filename only
-    m = re.search(date_regex, file_name)
-    if not m:
-        today_example = datetime.today().strftime(date_format)
-        error_exit(
-            "Error: Filename does not contain a valid date.\n"
-            f"  Expected format : {date_format}\n"
-            f"  Example (today) : {today_example}\n"
-            f"  Example filename: report_{today_example}.txt"
-        )
-
-    old_date_str = m.group()
-    today_str = datetime.today().strftime(date_format)
-
-    # Validate date string
-    try:
-        datetime.strptime(old_date_str, date_format)
-    except ValueError:
-        error_exit(
-            "Error: Invalid date in filename.\n"
-            f"  Date string    : {old_date_str}\n"
-            f"  Expected format: {date_format}"
-        )
-
-    # Check if date is today
-    if old_date_str == today_str:
-        error_exit(
-            "Error: The date in the filename is today.\n"
-            f"  Date in filename: {old_date_str}\n"
-            f"  Today           : {today_str}\n"
-            "  Please specify a file with a date other than today."
-        )
-
-    # Replace date with today
-    new_file_name = file_name.replace(old_date_str, today_str)
-    dst_path = os.path.join(dir_path, new_file_name)
-
-    # Copy file (with metadata)
+    # copy
     shutil.copy2(input_path, dst_path)
 
-    # Set source file to read-only
+    # set source readonly
     os.chmod(input_path, stat.S_IREAD)
 
     print("Copy completed successfully.")
@@ -119,8 +144,6 @@ def main():
     print(f"Destination : {dst_path}")
     #print("Source file permission set to read-only.")
 
+
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        error_exit(f"Unexpected error: {e}")
+    main()
