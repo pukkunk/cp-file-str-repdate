@@ -1,9 +1,15 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 pukkun
+# coding: utf-8
+
+import argparse,textwrap
 import os
 import sys
 import re
 import shutil
 import stat
 import configparser
+import platform
 from datetime import datetime
 from typing import Dict
 
@@ -96,18 +102,53 @@ def extract_date_from_filename(filename: str, date_format: str) -> str:
     return date_str
 
 
+def init_paths():
+    global SCR_PATH, SCR_FOLDER
+    SCR_PATH = os.path.abspath(sys.argv[0])
+    SCR_FOLDER = os.path.dirname(SCR_PATH)
+
 # ============================================================
 # Main
 # ============================================================
 
+__version_short__ = f"0.0.1, python={platform.python_version()} {platform.architecture()[0]}"
+__version__ = f"{__version_short__}\n"
+__copyright__    = 'pukkunk'
+__author__       = 'pukkunk'
+
 def main() -> None:
-    if len(sys.argv) != 2:
-        error_exit("Usage: cp_file_str_repdate <input_file>")
+    init_paths()
+    h_word = "A file copy tool that replaces the date string in filenames with today's date."
+    parser = argparse.ArgumentParser(
+        prog=os.path.basename(SCR_PATH),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent(f'''\
+        version={__version__}
+        {h_word}
+        Copyright :{__copyright__}
+        author :{__author__}
+        ''')
+    )
+    parser.add_argument(
+        "input_file",                 # 修正: 位置引数として定義
+        help="Input file path to be processed"
+    )
 
-    input_path: str = os.path.abspath(sys.argv[1])
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=os.path.basename(SCR_PATH) + " version=" + __version__
+    )
 
-    if not os.path.isfile(input_path):
-        error_exit(f"Input file not found: {input_path}")
+    args = parser.parse_args()
+
+    input_path: str = os.path.abspath(args.input_file)
+
+    if not os.path.exists(input_path):  # 修正
+        error_exit(f"Input file does not exist: {input_path}")
+
+    if not os.path.isfile(input_path):  # 修正
+        error_exit(f"Input path is not a file: {input_path}")
 
     # load ini
     ini: Dict[str, str] = load_ini()
